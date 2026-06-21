@@ -1,0 +1,24 @@
+<h2>Transaction History</h2>
+
+<table border="1" cellpadding="10">
+    <tr>
+        <th>ID</th>
+        <th>Sender</th>
+        <th>Receiver</th>
+        <th>Amount</th>
+        <th>Date</th>
+    </tr>
+
+    {% for t in transactions %}
+    <tr>
+        <td>{{ t[0] }}</td>
+        <td>{{ t[1] }}</td>
+        <td>{{ t[2] }}</td>
+        <td>₹{{ t[3] }}</td>
+        <td>{{ t[4] }}</td>
+    </tr>
+    {% endfor %}
+</table>
+
+<br>
+<a href="/dashboard">Back to Dashboard</a>

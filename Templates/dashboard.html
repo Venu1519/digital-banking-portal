@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Digital Banking Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+
+<body class="bg-light">
+
+<div class="container mt-5">
+    <div class="card shadow p-4">
+        <h2>Welcome {{ username }}</h2>
+        <h4>Account Balance: ₹{{ balance }}</h4>
+
+        <hr>
+
+        <a href="/transfer" class="btn btn-primary">Fund Transfer</a>
+        <a href="/transactions" class="btn btn-info">Transaction History</a>
+        <a href="/deposit" class="btn btn-success">Deposit</a>
+        <a href="/withdraw" class="btn btn-warning">Withdraw</a>
+        <a href="/admin" class="btn btn-dark">Admin Dashboard</a>
+        <a href="/logout" class="btn btn-danger">Logout</a>
+    </div>
+</div>
+
+</body>
+</html>
+
+<a href="/profile" class="btn btn-secondary">Profile</a>
+<a href="/statement" class="btn btn-secondary">Download Statement</a>
+<a href="/api/balance" class="btn btn-secondary">Balance API</a>
