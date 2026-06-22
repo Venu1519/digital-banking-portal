@@ -4,14 +4,16 @@ from flask_mysqldb import MySQL
 from flask import send_file
 from reportlab.pdfgen import canvas
 import io
+import os
+
 
 app = Flask(__name__)
-app.secret_key = "bank123"
+app.secret_key = os.environ.get("SECRET_KEY", "bank123")
 
-app.config['MYSQL_HOST'] = 'localhost'
-app.config['MYSQL_USER'] = 'bankuser'
-app.config['MYSQL_PASSWORD'] = 'bank123'
-app.config['MYSQL_DB'] = 'banking_db'
+app.config['MYSQL_HOST'] = os.environ.get("MYSQL_HOST", "localhost")
+app.config['MYSQL_USER'] = os.environ.get("MYSQL_USER", "bankuser")
+app.config['MYSQL_PASSWORD'] = os.environ.get("MYSQL_PASSWORD", "bank123")
+app.config['MYSQL_DB'] = os.environ.get("MYSQL_DB", "banking_db")
 
 mysql = MySQL(app)
 
