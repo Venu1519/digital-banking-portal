@@ -1,56 +1,89 @@
-from flask import Flask, render_template, request, redirect, session
+from flask import Flask, render_template, request, redirect, session, send_file
 from werkzeug.security import generate_password_hash, check_password_hash
-from flask_mysqldb import MySQL
-from flask import send_file
 from reportlab.pdfgen import canvas
-import io
+import psycopg2
 import os
-
+import io
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "bank123")
 
-app.config['MYSQL_HOST'] = os.environ.get("MYSQL_HOST", "localhost")
-app.config['MYSQL_USER'] = os.environ.get("MYSQL_USER", "bankuser")
-app.config['MYSQL_PASSWORD'] = os.environ.get("MYSQL_PASSWORD", "bank123")
-app.config['MYSQL_DB'] = os.environ.get("MYSQL_DB", "banking_db")
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
-mysql = MySQL(app)
+def get_db_connection():
+    return psycopg2.connect(DATABASE_URL)
 
-# Home
+
 @app.route('/')
 def home():
     return redirect('/login')
 
-# Register
+
+@app.route('/init-db')
+def init_db():
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            username VARCHAR(100) UNIQUE NOT NULL,
+            password VARCHAR(255) NOT NULL,
+            balance NUMERIC(10,2) DEFAULT 1000.00,
+            role VARCHAR(20) DEFAULT 'customer'
+        );
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS transactions (
+            id SERIAL PRIMARY KEY,
+            sender_id INTEGER REFERENCES users(id),
+            receiver_id INTEGER REFERENCES users(id),
+            amount NUMERIC(10,2),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return "Database tables created successfully!"
+
+
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
         username = request.form['username']
         password = generate_password_hash(request.form['password'])
 
-        cur = mysql.connection.cursor()
+        conn = get_db_connection()
+        cur = conn.cursor()
         cur.execute(
-            "INSERT INTO users(username,password) VALUES(%s,%s)",
-            (username,password)
+            "INSERT INTO users(username, password) VALUES(%s, %s)",
+            (username, password)
         )
-        mysql.connection.commit()
+        conn.commit()
         cur.close()
+        conn.close()
 
         return redirect('/login')
 
     return render_template('register.html')
 
-# Login
-@app.route('/login', methods=['GET','POST'])
+
+@app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
 
-        cur = mysql.connection.cursor()
+        conn = get_db_connection()
+        cur = conn.cursor()
         cur.execute("SELECT * FROM users WHERE username=%s", (username,))
         user = cur.fetchone()
+        cur.close()
+        conn.close()
 
         if user and check_password_hash(user[2], password):
             session['user_id'] = user[0]
@@ -60,27 +93,26 @@ def login():
             return "Invalid username or password"
 
     return render_template('login.html')
-    
 
-# Dashboard
+
 @app.route('/dashboard')
 def dashboard():
-    cur = mysql.connection.cursor()
+    if 'user_id' not in session:
+        return redirect('/login')
 
+    conn = get_db_connection()
+    cur = conn.cursor()
     cur.execute(
-        "SELECT username,balance FROM users WHERE id=%s",
+        "SELECT username, balance FROM users WHERE id=%s",
         (session['user_id'],)
     )
-
     user = cur.fetchone()
+    cur.close()
+    conn.close()
 
-    return render_template(
-        'dashboard.html',
-        username=user[0],
-        balance=user[1]
-    )
+    return render_template('dashboard.html', username=user[0], balance=user[1])
 
-# Logout
+
 @app.route('/logout')
 def logout():
     session.clear()
@@ -96,7 +128,8 @@ def transfer():
         receiver = request.form['receiver']
         amount = float(request.form['amount'])
 
-        cur = mysql.connection.cursor()
+        conn = get_db_connection()
+        cur = conn.cursor()
 
         cur.execute("SELECT id, balance FROM users WHERE username=%s", (receiver,))
         receiver_user = cur.fetchone()
@@ -107,16 +140,24 @@ def transfer():
         if receiver_user and sender_balance >= amount:
             receiver_id = receiver_user[0]
 
-            cur.execute("UPDATE users SET balance = balance - %s WHERE id=%s", (amount, session['user_id']))
-            cur.execute("UPDATE users SET balance = balance + %s WHERE id=%s", (amount, receiver_id))
             cur.execute(
-                "INSERT INTO transactions(sender_id, receiver_id, amount) VALUES(%s,%s,%s)",
+                "UPDATE users SET balance = balance - %s WHERE id=%s",
+                (amount, session['user_id'])
+            )
+            cur.execute(
+                "UPDATE users SET balance = balance + %s WHERE id=%s",
+                (amount, receiver_id)
+            )
+            cur.execute(
+                "INSERT INTO transactions(sender_id, receiver_id, amount) VALUES(%s, %s, %s)",
                 (session['user_id'], receiver_id, amount)
             )
 
-            mysql.connection.commit()
-            cur.close()
-            return redirect('/dashboard')
+            conn.commit()
+
+        cur.close()
+        conn.close()
+        return redirect('/dashboard')
 
     return render_template('transfer.html')
 
@@ -126,7 +167,8 @@ def transactions():
     if 'user_id' not in session:
         return redirect('/login')
 
-    cur = mysql.connection.cursor()
+    conn = get_db_connection()
+    cur = conn.cursor()
 
     cur.execute("""
         SELECT 
@@ -144,8 +186,10 @@ def transactions():
 
     transactions = cur.fetchall()
     cur.close()
+    conn.close()
 
     return render_template('transactions.html', transactions=transactions)
+
 
 @app.route('/deposit', methods=['GET', 'POST'])
 def deposit():
@@ -155,17 +199,20 @@ def deposit():
     if request.method == 'POST':
         amount = float(request.form['amount'])
 
-        cur = mysql.connection.cursor()
+        conn = get_db_connection()
+        cur = conn.cursor()
         cur.execute(
-            "UPDATE users SET balance = balance + %s WHERE id = %s",
+            "UPDATE users SET balance = balance + %s WHERE id=%s",
             (amount, session['user_id'])
         )
-        mysql.connection.commit()
+        conn.commit()
         cur.close()
+        conn.close()
 
         return redirect('/dashboard')
 
     return render_template('deposit.html')
+
 
 @app.route('/withdraw', methods=['GET', 'POST'])
 def withdraw():
@@ -175,18 +222,20 @@ def withdraw():
     if request.method == 'POST':
         amount = float(request.form['amount'])
 
-        cur = mysql.connection.cursor()
+        conn = get_db_connection()
+        cur = conn.cursor()
         cur.execute("SELECT balance FROM users WHERE id=%s", (session['user_id'],))
         balance = cur.fetchone()[0]
 
         if balance >= amount:
             cur.execute(
-                "UPDATE users SET balance = balance - %s WHERE id = %s",
+                "UPDATE users SET balance = balance - %s WHERE id=%s",
                 (amount, session['user_id'])
             )
-            mysql.connection.commit()
+            conn.commit()
 
         cur.close()
+        conn.close()
         return redirect('/dashboard')
 
     return render_template('withdraw.html')
@@ -200,7 +249,8 @@ def admin():
     if session.get('role') != 'admin':
         return "Access Denied! Admin only."
 
-    cur = mysql.connection.cursor()
+    conn = get_db_connection()
+    cur = conn.cursor()
 
     cur.execute("SELECT id, username, balance, role FROM users")
     users = cur.fetchall()
@@ -220,34 +270,36 @@ def admin():
     transactions = cur.fetchall()
 
     cur.close()
+    conn.close()
 
-    return render_template(
-        'admin.html',
-        users=users,
-        transactions=transactions
-    )
+    return render_template('admin.html', users=users, transactions=transactions)
+
 
 @app.route('/profile')
 def profile():
     if 'user_id' not in session:
         return redirect('/login')
 
-    cur = mysql.connection.cursor()
+    conn = get_db_connection()
+    cur = conn.cursor()
     cur.execute(
         "SELECT id, username, balance, role FROM users WHERE id=%s",
         (session['user_id'],)
     )
     user = cur.fetchone()
     cur.close()
+    conn.close()
 
     return render_template('profile.html', user=user)
+
 
 @app.route('/statement')
 def statement():
     if 'user_id' not in session:
         return redirect('/login')
 
-    cur = mysql.connection.cursor()
+    conn = get_db_connection()
+    cur = conn.cursor()
     cur.execute("""
         SELECT 
             t.id,
@@ -264,6 +316,7 @@ def statement():
 
     transactions = cur.fetchall()
     cur.close()
+    conn.close()
 
     buffer = io.BytesIO()
     pdf = canvas.Canvas(buffer)
@@ -292,14 +345,15 @@ def api_balance():
     if 'user_id' not in session:
         return {"error": "Unauthorized"}, 401
 
-    cur = mysql.connection.cursor()
+    conn = get_db_connection()
+    cur = conn.cursor()
     cur.execute(
         "SELECT username, balance FROM users WHERE id=%s",
         (session['user_id'],)
     )
-
     user = cur.fetchone()
     cur.close()
+    conn.close()
 
     return {
         "username": user[0],
